@@ -4,9 +4,14 @@
   "type": "module",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "check": "node --check bot.js"
   },
   "dependencies": {
     "telegraf": "^4.16.3"
+  },
+  "description": "Telegram bot for launching the OPENCASE web app.",
+  "engines": {
+    "node": ">=18"
   }
 }

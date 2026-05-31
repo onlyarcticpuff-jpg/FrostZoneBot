@@ -2,74 +2,129 @@ import { Telegraf, Markup } from "telegraf";
 import fs from "fs";
 import path from "path";
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const APP_URL = process.env.APP_URL;
-
-if (!BOT_TOKEN) throw new Error("Missing TELEGRAM_BOT_TOKEN");
-if (!APP_URL) throw new Error("Missing APP_URL");
+const BOT_TOKEN = getRequiredEnv("TELEGRAM_BOT_TOKEN");
+const APP_URL = getRequiredUrl("APP_URL");
+const CHANNEL_URL = process.env.CHANNEL_URL || "https://t.me/OpenCaseTG";
+const CHANNEL_HANDLE = process.env.CHANNEL_HANDLE || "@OpenCaseTG";
+const BRAND_NAME = process.env.BRAND_NAME || "OPENCASE";
 
 const bot = new Telegraf(BOT_TOKEN);
 
-const BANNER_MAIN = path.resolve("public/bannerM.png");
-const BANNER_HELP = path.resolve("public/bannerH.png");
+const ASSET_DIR = path.resolve("public");
+const BANNERS = {
+  main: path.join(ASSET_DIR, "bannerM.png"),
+  help: path.join(ASSET_DIR, "bannerH.png"),
+};
 
-const mainKeyboard = Markup.inlineKeyboard([
-  [Markup.button.webApp("🎁 Open a Case", APP_URL)],
-  [Markup.button.url("📣 Channel", "https://t.me/OpenCaseTG")],
-]);
+const COMMANDS = [
+  { command: "start", description: "Restart the bot" },
+  { command: "app", description: `Launch ${BRAND_NAME}` },
+  { command: "channel", description: "Open the news channel" },
+  { command: "help", description: "Show help and commands" },
+];
 
-const helpKeyboard = Markup.inlineKeyboard([
-  [Markup.button.webApp("🎁 Open a Case", APP_URL)],
-  [Markup.button.url("📣 Channel", "https://t.me/OpenCaseTG")],
-]);
+function getRequiredEnv(name) {
+  const value = process.env[name]?.trim();
 
-async function sendWithBanner(ctx, bannerPath, caption, keyboard) {
-  if (fs.existsSync(bannerPath)) {
-    await ctx.replyWithPhoto(
-      { source: fs.createReadStream(bannerPath) },
-      { caption, parse_mode: "Markdown", ...keyboard }
-    );
-  } else {
-    await ctx.reply(caption, { parse_mode: "Markdown", ...keyboard });
+  if (!value) {
+    throw new Error(`Missing ${name}`);
+  }
+
+  return value;
+}
+
+function getRequiredUrl(name) {
+  const value = getRequiredEnv(name);
+
+  try {
+    return new URL(value).toString();
+  } catch {
+    throw new Error(`${name} must be a valid absolute URL`);
   }
 }
 
+function escapeHtml(value = "") {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function appKeyboard(extraRows = []) {
+  return Markup.inlineKeyboard([
+    [Markup.button.webApp("🎁 Open a Case", APP_URL)],
+    [Markup.button.url("📣 Channel", CHANNEL_URL)],
+    ...extraRows,
+  ]);
+}
+
+async function sendWithBanner(ctx, bannerPath, caption, keyboard = appKeyboard()) {
+  const messageOptions = { parse_mode: "HTML", ...keyboard };
+
+  if (fs.existsSync(bannerPath)) {
+    await ctx.replyWithPhoto(
+      { source: fs.createReadStream(bannerPath) },
+      { caption, ...messageOptions }
+    );
+    return;
+  }
+
+  await ctx.reply(caption, messageOptions);
+}
+
+function homeCaption(firstName) {
+  const name = escapeHtml(firstName || "there");
+
+  return [
+    `Hey ${name} 👋`,
+    "",
+    `Welcome to <b>${escapeHtml(BRAND_NAME)}</b> — open cases, collect items, and chase the next big pull.`,
+    "",
+    "New cases drop regularly. Tap below to start.",
+  ].join("\n");
+}
+
+function helpCaption() {
+  return [
+    "<b>What can I do?</b>",
+    "",
+    `🎁 Launch <b>${escapeHtml(BRAND_NAME)}</b> and open cases in the web app.`,
+    `📣 Follow ${escapeHtml(CHANNEL_HANDLE)} for drops, updates, and announcements.`,
+    "",
+    "<b>Commands</b>",
+    "/start — restart the bot",
+    ` /app — launch ${escapeHtml(BRAND_NAME)}`.trim(),
+    "/channel — open the news channel",
+    "/help — show this menu",
+  ].join("\n");
+}
+
+bot.telegram.setMyCommands(COMMANDS).catch((error) => {
+  console.warn("Could not register Telegram commands:", error.message);
+});
+
 bot.start(async (ctx) => {
-  const name = ctx.from?.first_name || "there";
-  await sendWithBanner(
-    ctx,
-    BANNER_MAIN,
-    `Hey ${name} 👋\n\nWelcome to *OPENCASE* — open cases, collect items, and see what you get.\n\nNew cases drop regularly. Tap below to start.`,
-    mainKeyboard
-  );
+  await sendWithBanner(ctx, BANNERS.main, homeCaption(ctx.from?.first_name));
 });
 
 bot.command("app", async (ctx) => {
   await sendWithBanner(
     ctx,
-    BANNER_MAIN,
-    `*OPENCASE* is one tap away 👇`,
-    mainKeyboard
+    BANNERS.main,
+    `<b>${escapeHtml(BRAND_NAME)}</b> is one tap away 👇`
   );
 });
 
 bot.command("help", async (ctx) => {
-  await sendWithBanner(
-    ctx,
-    BANNER_HELP,
-    `*Here's what you can do:*\n\n/start — restart the bot\n/app — launch OPENCASE\n/channel — news & new cases\n/help — this menu`,
-    helpKeyboard
-  );
+  await sendWithBanner(ctx, BANNERS.help, helpCaption());
 });
 
 bot.command("channel", async (ctx) => {
   await ctx.reply(
-    `Follow *@OpenCaseTG* for new case announcements, drops, and updates.`,
+    `Follow ${escapeHtml(CHANNEL_HANDLE)} for new case announcements, drops, and updates.`,
     {
-      parse_mode: "Markdown",
-      ...Markup.inlineKeyboard([
-        [Markup.button.url("📣 Join the Channel", "https://t.me/OpenCaseTG")],
-      ]),
+      parse_mode: "HTML",
+      ...Markup.inlineKeyboard([[Markup.button.url("📣 Join the Channel", CHANNEL_URL)]]),
     }
   );
 });
@@ -77,15 +132,23 @@ bot.command("channel", async (ctx) => {
 bot.on("message", async (ctx) => {
   await sendWithBanner(
     ctx,
-    BANNER_MAIN,
-    `Tap below to open OPENCASE 👇`,
-    mainKeyboard
+    BANNERS.main,
+    `Tap below to open <b>${escapeHtml(BRAND_NAME)}</b> 👇`
   );
 });
 
-bot.launch();
+bot.catch((error, ctx) => {
+  const updateId = ctx?.update?.update_id ?? "unknown";
+  console.error(`Bot error while handling update ${updateId}:`, error);
+});
 
-console.log("OPENCASE bot running");
+await bot.launch();
+console.log(`${BRAND_NAME} bot running`);
 
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+function shutdown(signal) {
+  console.log(`Received ${signal}; stopping bot...`);
+  bot.stop(signal);
+}
+
+process.once("SIGINT", () => shutdown("SIGINT"));
+process.once("SIGTERM", () => shutdown("SIGTERM"));
